@@ -7,7 +7,7 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\field\Entity\FieldStorageConfig;
 
 /**
- * Provides the search reindex confirmation form.
+ * Provides the bricks settings form.
  */
 class Settings extends ConfigFormBase {
 

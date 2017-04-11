@@ -187,6 +187,9 @@ function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $
       if ($key !== 'add_more') {
         $depth = $element[$key]['depth']['#value'];
 
+        $variables['table']['#rows'][$key]['data-depth'] = $depth;
+        $variables['table']['#rows'][$key]['data-bundle'] = $element[$key]['#entity']->bundle();
+
         $indentation = array();
         if ($depth > 0) {
           $indentation = array(
@@ -223,6 +226,8 @@ function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $
       'group' => $order_class,
     );
 
+    $variables['table']['#attached']['drupalSettings']['bricks']['nesting'] = bricks_get_nesting_data($element['#entity_type']);
+    $variables['table']['#attached']['library'][] = 'bricks/nesting-validation';
     $variables['table']['#attached']['library'][] = 'bricks/tabledrag.relationship-all';
   }
 }
@@ -259,4 +264,35 @@ function _bricks_form_element_alter(&$element, $item, $entity_type) {
       'placeholder' => t('CSS class(-es)'),
     ),
   );
+}
+
+/**
+ * Returns the nesting settings in a format that the javascript can handle.
+ */
+function bricks_get_nesting_data($return_entity_type = NULL) {
+  $bricks_settings = \Drupal::config('bricks.settings');
+  $nesting_data = $bricks_settings->get('nesting');
+
+  $formatted_nesting_data = [];
+
+  foreach ($nesting_data as $entity_type => $bundles) {
+    foreach ($bundles as $bundle => $bundles_that_may_be_parent) {
+      foreach ($bundles_that_may_be_parent as $bundle_that_may_be_parent) {
+        if ($bundle_that_may_be_parent) {
+          $formatted_nesting_data[$entity_type][$bundle][] = $bundle_that_may_be_parent;
+        }
+      }
+    }
+  }
+
+  if ($return_entity_type) {
+    if (isset($formatted_nesting_data[$return_entity_type])) {
+      return $formatted_nesting_data[$return_entity_type];
+    }
+    else {
+      throw new Exception('Missing entity type data for bricks_get_nesting_data');
+    }
+  }
+
+  return $formatted_nesting_data;
 }
