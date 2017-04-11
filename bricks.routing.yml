@@ -1,0 +1,7 @@
+bricks.config:
+  path: '/admin/config/media/bricks'
+  defaults:
+    _form: '\Drupal\bricks\Form\Settings'
+    _title: 'Bricks settings'
+  requirements:
+    _permission: 'administer site configuration'
