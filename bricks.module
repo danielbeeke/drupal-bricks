@@ -187,7 +187,6 @@ function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $
       if ($key !== 'add_more') {
         $depth = $element[$key]['depth']['#value'];
 
-        $variables['table']['#rows'][$key]['data-depth'] = $depth;
         $variables['table']['#rows'][$key]['data-bundle'] = $element[$key]['#entity']->bundle();
 
         $indentation = array();
