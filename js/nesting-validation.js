@@ -12,28 +12,47 @@
                     return $.inArray(possibleParentBundle, settings.bricks.nesting[rowBundle]) !== -1;
                 };
 
-                var getParent = function (element) {
-                    var initialDepth = getDepthOfRow(element);
-                    element = $(element).prev('tr')[0];
+                var getMaxIndentForType = function (element, prevRow, nextRow) {
+                    var rowBundle = element.dataset.bundle;
+                    var prevRows = [prevRow].concat($(prevRow).prevAll('tr').get());
 
-                    while (getDepthOfRow(element) > initialDepth - 1 && $(element).length) {
-                        element = $(element).prev('tr')[0];
+                    var branchRows = [];
+                    var done = false;
+
+                    $(prevRows).each(function(delta, row) {
+                        if (!done && row != element) {
+                            branchRows.push(row);
+                            done = getDepthOfRow(row) == 0;
+                        }
+                    });
+
+                    branchRows = branchRows.reverse();
+
+                    done = false;
+
+                    var maxDepth = 0;
+                    $(branchRows).each(function (delta, row) {
+                        if (!done && mayNestByBundle(rowBundle, row.dataset.bundle)) {
+                            maxDepth = getDepthOfRow(row) + 1;
+                        }
+                        else if (!done && !mayNestByBundle(rowBundle, row.dataset.bundle)) {
+                            maxDepth = getDepthOfRow(row);
+                        }
+                        else {
+                            done = true;
+                        }
+                    });
+
+                    if (getDepthOfRow(prevRow) + 1 < maxDepth) {
+                        maxDepth = getDepthOfRow(prevRow) + 1;
                     }
 
-                    return element;
-                };
-
-                var getFirstSibling = function (element) {
-                    var initialDepth = getDepthOfRow(element);
-                    element = $(element).prev('tr')[0];
-
-                    while (getDepthOfRow(element) >= initialDepth + 1 && $(element).length) {
-                        element = $(element).prev('tr')[0];
+                    if (!branchRows.length) {
+                        maxDepth = 1;
                     }
 
-                    return element;
+                    return maxDepth;
                 };
-
 
                 /**
                  * Determine the valid indentations interval for the row at a given position.
@@ -50,22 +69,9 @@
                  *   interval.
                  */
                 Drupal.tableDrag.prototype.row.prototype.validIndentInterval = function (prevRow, nextRow) {
-                    var parentRow = getParent(this.element);
-                    var siblingRow = getFirstSibling(this.element);
-
                     var $prevRow = $(prevRow);
                     var minIndent;
                     var maxIndent;
-
-                    var currentBundle = this.element.dataset.bundle;
-                    var prevBundle = prevRow ? prevRow.dataset.bundle : false;
-                    var parentBundle = parentRow ? parentRow.dataset.bundle : false;
-                    var siblingBundle = siblingRow ? siblingRow.dataset.bundle : false;
-
-                    var currentDepth = getDepthOfRow(this.element);
-                    var prevDepth = getDepthOfRow(prevRow);
-                    var parentDepth = getDepthOfRow(parentRow);
-                    var siblingDepth = getDepthOfRow(siblingRow);
 
                     // Minimum indentation:
                     // Do not orphan the next row.
@@ -81,26 +87,8 @@
                     }
                     else {
                         // Do not go deeper than as a child of the previous row.
-                        maxIndent = $prevRow.find('.js-indentation').length + ($prevRow.is('.tabledrag-leaf') ? 0 : 1);
-
-                        // Validate the previous row.
-                        if (!mayNestByBundle(currentBundle, prevBundle) && prevDepth == currentDepth) {
-                            maxIndent = this.indents;
-                        }
-
-                        // TODO this may need more recursive like code.
-                        if (prevDepth == currentDepth + 1) {
-                            if (mayNestByBundle(currentBundle, getParent(prevRow).dataset.bundle)) {
-                                maxIndent = this.indents + 1;
-                            }
-                            else {
-                                maxIndent = this.indents;
-                            }
-                        }
-
-                        if (!mayNestByBundle(currentBundle, siblingBundle) && siblingDepth == currentDepth) {
-                            maxIndent = this.indents;
-                        }
+                        maxIndent = getMaxIndentForType(this.element, prevRow, nextRow);
+                        // maxIndent = $prevRow.find('.js-indentation').length + ($prevRow.is('.tabledrag-leaf') ? 0 : 1);
 
                         // Limit by the maximum allowed depth for the table.
                         if (this.maxDepth) {
