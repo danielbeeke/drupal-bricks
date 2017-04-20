@@ -12,48 +12,6 @@
                     return $.inArray(possibleParentBundle, settings.bricks.nesting[rowBundle]) !== -1;
                 };
 
-                var getMaxIndentForType = function (element, prevRow, nextRow) {
-                    var rowBundle = element.dataset.bundle;
-                    var prevRows = [prevRow].concat($(prevRow).prevAll('tr').get());
-
-                    var branchRows = [];
-                    var done = false;
-
-                    $(prevRows).each(function(delta, row) {
-                        if (!done && row != element) {
-                            branchRows.push(row);
-                            done = getDepthOfRow(row) == 0;
-                        }
-                    });
-
-                    branchRows = branchRows.reverse();
-
-                    done = false;
-
-                    var maxDepth = 0;
-                    $(branchRows).each(function (delta, row) {
-                        if (!done && mayNestByBundle(rowBundle, row.dataset.bundle)) {
-                            maxDepth = getDepthOfRow(row) + 1;
-                        }
-                        else if (!done && !mayNestByBundle(rowBundle, row.dataset.bundle)) {
-                            maxDepth = getDepthOfRow(row);
-                        }
-                        else {
-                            done = true;
-                        }
-                    });
-
-                    if (getDepthOfRow(prevRow) + 1 < maxDepth) {
-                        maxDepth = getDepthOfRow(prevRow) + 1;
-                    }
-
-                    if (!branchRows.length) {
-                        maxDepth = 1;
-                    }
-
-                    return maxDepth;
-                };
-
                 /**
                  * Determine the valid indentations interval for the row at a given position.
                  *
@@ -86,9 +44,45 @@
                         maxIndent = 0;
                     }
                     else {
-                        // Do not go deeper than as a child of the previous row.
-                        maxIndent = getMaxIndentForType(this.element, prevRow, nextRow);
-                        // maxIndent = $prevRow.find('.js-indentation').length + ($prevRow.is('.tabledrag-leaf') ? 0 : 1);
+                        maxIndent = this.indents;
+                        var realPrevRow = this.direction == 'up' ? nextRow : prevRow;
+
+                        var thisRowDepth = getDepthOfRow(this.element);
+                        var thisRowBundle = this.element.dataset.bundle;
+                        var previousRows = $(realPrevRow).prevAll('tr').addBack().get().reverse();
+                        var firstPreviousRow = previousRows[0];
+                        var firstPreviousRowDepth = getDepthOfRow(firstPreviousRow);
+
+                        // The row above the one that is dragged has the same depth.
+                        if (thisRowDepth == firstPreviousRowDepth) {
+                            maxIndent = this.indents + mayNestByBundle(thisRowBundle, firstPreviousRow.dataset.bundle);
+                        }
+
+                        // This row is nested under the one above.
+                        else if (thisRowDepth > firstPreviousRowDepth) {
+                            maxIndent = firstPreviousRowDepth;
+                        }
+
+                        // This row is nested under a parent of the above row.
+                        else if (thisRowDepth < firstPreviousRowDepth) {
+                            var trailRows = [];
+                            var decremental = thisRowDepth + 1;
+
+                            $(previousRows).each(function (delta, row) {
+                                if (getDepthOfRow(row) <= thisRowDepth && getDepthOfRow(row) < decremental) {
+                                    decremental--;
+                                    trailRows.push(row);
+                                }
+                            });
+
+                            var done = false;
+                            $(trailRows).each(function (delta, row) {
+                                if (!done && mayNestByBundle(thisRowBundle, row.dataset.bundle)) {
+                                    done = true;
+                                    maxIndent = getDepthOfRow(row) + 1;
+                                }
+                            });
+                        }
 
                         // Limit by the maximum allowed depth for the table.
                         if (this.maxDepth) {
