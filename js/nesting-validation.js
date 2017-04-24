@@ -4,95 +4,143 @@
 
             if (Drupal.tableDrag) {
 
-                var getDepthOfRow = function (element) {
-                    return parseInt($(element).find('.bricks-depth').val());
-                };
-
                 var mayNestByBundle = function (rowBundle, possibleParentBundle) {
                     return $.inArray(possibleParentBundle, settings.bricks.nesting[rowBundle]) !== -1;
                 };
 
+
                 /**
-                 * Determine the valid indentations interval for the row at a given position.
+                 * Validate an indent action, bricks validation specific.
                  *
-                 * @param {?HTMLElement} prevRow
-                 *   DOM object for the row before the tested position
-                 *   (or null for first position in the table).
-                 * @param {?HTMLElement} nextRow
-                 *   DOM object for the row after the tested position
-                 *   (or null for last position in the table).
+                 * @param {HTMLElement} prevRow
+                 *   The previous row.
                  *
-                 * @return {object}
-                 *   An object with the keys `min` and `max` to indicate the valid indent
-                 *   interval.
+                 * @param {HTMLElement} nextRow
+                 *   The next row.
+                 *
+                 * @param {number} indentDiff
+                 *   The number of additional indentations proposed for the row (can be
+                 *   positive or negative). This number will be adjusted to nearest valid
+                 *   indentation level for the row.
+                 *
+                 * @return {bool}
+                 *   Whether the indent is valid.
                  */
-                Drupal.tableDrag.prototype.row.prototype.validIndentInterval = function (prevRow, nextRow) {
-                    var $prevRow = $(prevRow);
-                    var minIndent;
-                    var maxIndent;
+                Drupal.tableDrag.prototype.row.prototype.validIndent = function (prevRow, nextRow, indentDiff) {
+                    var ownRowDepth = this.indents;
+                    var prevRowDepth = $(prevRow).find('.js-indentation').length;
 
-                    // Minimum indentation:
-                    // Do not orphan the next row.
-                    minIndent = nextRow ? $(nextRow).find('.js-indentation').length : 0;
-
-                    // Maximum indentation:
-                    if (!prevRow || $prevRow.is(':not(.draggable)') || $(this.element).is('.tabledrag-root')) {
-                        // Do not indent:
-                        // - the first row in the table,
-                        // - rows dragged below a non-draggable row,
-                        // - 'root' rows.
-                        maxIndent = 0;
-                    }
-                    else {
-                        maxIndent = this.indents;
-                        var realPrevRow = this.direction == 'up' ? nextRow : prevRow;
-
-                        var thisRowDepth = getDepthOfRow(this.element);
-                        var thisRowBundle = this.element.dataset.bundle;
-                        var previousRows = $(realPrevRow).prevAll('tr').addBack().get().reverse();
-                        var firstPreviousRow = previousRows[0];
-                        var firstPreviousRowDepth = getDepthOfRow(firstPreviousRow);
-
-                        // The row above the one that is dragged has the same depth.
-                        if (thisRowDepth == firstPreviousRowDepth) {
-                            maxIndent = this.indents + mayNestByBundle(thisRowBundle, firstPreviousRow.dataset.bundle);
-                        }
-
-                        // This row is nested under the one above.
-                        else if (thisRowDepth > firstPreviousRowDepth) {
-                            maxIndent = firstPreviousRowDepth;
-                        }
-
-                        // This row is nested under a parent of the above row.
-                        else if (thisRowDepth < firstPreviousRowDepth) {
-                            var trailRows = [];
-                            var decremental = thisRowDepth + 1;
-
-                            $(previousRows).each(function (delta, row) {
-                                if (getDepthOfRow(row) <= thisRowDepth && getDepthOfRow(row) < decremental) {
-                                    decremental--;
-                                    trailRows.push(row);
-                                }
-                            });
-
-                            var done = false;
-                            $(trailRows).each(function (delta, row) {
-                                if (!done && mayNestByBundle(thisRowBundle, row.dataset.bundle)) {
-                                    done = true;
-                                    maxIndent = getDepthOfRow(row) + 1;
-                                }
-                            });
-                        }
-
-                        // Limit by the maximum allowed depth for the table.
-                        if (this.maxDepth) {
-                            maxIndent = Math.min(maxIndent, this.maxDepth - (this.groupDepth - this.indents));
-                        }
+                    // The current is being nested under the next one.
+                    if (ownRowDepth + indentDiff > prevRowDepth) {
+                        var ownRowBundle = this.element.dataset.bundle;
+                        var prevRowBundle = prevRow.dataset.bundle;
+                        return mayNestByBundle(ownRowBundle, prevRowBundle);
                     }
 
-                    return {min: minIndent, max: maxIndent};
+                    return true;
                 };
 
+                /**
+                 * Indent a row within the legal bounds of the table.
+                 *
+                 * @param {number} indentDiff
+                 *   The number of additional indentations proposed for the row (can be
+                 *   positive or negative). This number will be adjusted to nearest valid
+                 *   indentation level for the row.
+                 *
+                 * @return {number}
+                 *   The number of indentations applied.
+                 */
+                Drupal.tableDrag.prototype.row.prototype.indent = function (indentDiff) {
+                    var $group = $(this.group);
+                    var prevRow = $(this.element).prev('tr').get(0);
+                    var nextRow = $group.eq(-1).next('tr').get(0);
+
+                    // Determine the valid indentations interval if not available yet.
+                    if (!this.interval) {
+                        this.interval = this.validIndentInterval(prevRow, nextRow);
+                    }
+
+                    // Adjust to the nearest valid indentation.
+                    var indent = this.indents + indentDiff;
+                    indent = Math.max(indent, this.interval.min);
+                    indent = Math.min(indent, this.interval.max);
+                    indentDiff = indent - this.indents;
+
+                    if (indentDiff && !this.validIndent(prevRow, nextRow, indentDiff)) {
+                        return false;
+                    }
+
+                    for (var n = 1; n <= Math.abs(indentDiff); n++) {
+                        // Add or remove indentations.
+                        if (indentDiff < 0) {
+                            $group.find('.js-indentation:first-of-type').remove();
+                            this.indents--;
+                        }
+                        else {
+                            $group.find('td:first-of-type').prepend(Drupal.theme('tableDragIndentation'));
+                            this.indents++;
+                        }
+                    }
+                    if (indentDiff) {
+                        // Update indentation for this row.
+                        this.changed = true;
+                        this.groupDepth += indentDiff;
+                        this.onIndent();
+                    }
+
+                    return indentDiff;
+                };
+
+
+                /**
+                 * Ensure that two rows are allowed to be swapped.
+                 *
+                 * @param {HTMLElement} row
+                 *   DOM object for the row being considered for swapping.
+                 *
+                 * @return {bool}
+                 *   Whether the swap is a valid swap or not.
+                 */
+                Drupal.tableDrag.prototype.row.prototype.isValidSwap = function (row) {
+                    var $row = $(row);
+                    if (this.indentEnabled) {
+                        var prevRow;
+                        var nextRow;
+                        if (this.direction === 'down') {
+                            prevRow = row;
+                            nextRow = $row.next('tr').get(0);
+                        }
+                        else {
+                            prevRow = $row.prev('tr').get(0);
+                            nextRow = row;
+                        }
+                        this.interval = this.validIndentInterval(prevRow, nextRow);
+                        var prevRowDepth = $(prevRow).find('.js-indentation').length;
+                        var ownRowDepth = this.indents;
+
+                        if (ownRowDepth > prevRowDepth && prevRowDepth != 0) {
+                            var ownRowBundle = this.element.dataset.bundle;
+                            var prevRowBundle = prevRow.dataset.bundle;
+
+                            if (!mayNestByBundle(ownRowBundle, prevRowBundle)) {
+                                return false;
+                            }
+                        }
+
+                        // We have an invalid swap if the valid indentations interval is empty.
+                        if (this.interval.min > this.interval.max) {
+                            return false;
+                        }
+                    }
+
+                    // Do not let an un-draggable first row have anything put before it.
+                    if (this.table.tBodies[0].rows[0] === row && $row.is(':not(.draggable)')) {
+                        return false;
+                    }
+
+                    return true;
+                };
             }
 
         }
