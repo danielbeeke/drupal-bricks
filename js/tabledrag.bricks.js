@@ -1,5 +1,5 @@
 (function ($, Drupal) {
-    Drupal.behaviors.bricksNestingValidation = {
+    Drupal.behaviors.tabledragBricks = {
         attach: function (context, settings) {
 
             if (Drupal.tableDrag) {
@@ -7,7 +7,6 @@
                 var mayNestByBundle = function (rowBundle, possibleParentBundle) {
                     return $.inArray(possibleParentBundle, settings.bricks.nesting[rowBundle]) !== -1;
                 };
-
 
                 /**
                  * Validate an indent action, bricks validation specific.
@@ -140,6 +139,50 @@
                     }
 
                     return true;
+                };
+
+                /**
+                 * Find all siblings for a row.
+                 *
+                 * According to its subgroup or indentation. Note that the passed-in row is
+                 * included in the list of siblings.
+                 *
+                 * @param {object} rowSettings
+                 *   The field settings we're using to identify what constitutes a sibling.
+                 *
+                 * @return {Array}
+                 *   An array of siblings.
+                 */
+                var findSiblings = Drupal.tableDrag.prototype.row.prototype.findSiblings;
+                Drupal.tableDrag.prototype.row.prototype.findSiblings = function (rowSettings) {
+                    if (rowSettings.relationship === 'all') {
+                        var siblings = [];
+                        var directions = ['prev', 'next'];
+                        var rowIndentation = this.indents;
+                        for (var d = 0; d < directions.length; d++) {
+                            var checkRow = $(this.element)[directions[d]]();
+                            while (checkRow.length) {
+                                // Check that the sibling contains a similar target field.
+                                if ($('.' + rowSettings.target, checkRow)) {
+                                    siblings.push(checkRow[0]);
+                                }
+                                else {
+                                    break;
+                                }
+                                checkRow = $(checkRow)[directions[d]]();
+                            }
+                            // Since siblings are added in reverse order for previous, reverse the
+                            // completed list of previous siblings. Add the current row and continue.
+                            if (directions[d] == 'prev') {
+                                siblings.reverse();
+                                siblings.push(this.element);
+                            }
+                        }
+                        return siblings;
+                    }
+                    else {
+                        return findSiblings.apply(this, arguments);
+                    }
                 };
             }
 

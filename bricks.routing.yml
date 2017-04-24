@@ -1,5 +1,5 @@
 bricks.config:
-  path: '/admin/config/media/bricks'
+  path: '/admin/structure/bricks'
   defaults:
     _form: '\Drupal\bricks\Form\Settings'
     _title: 'Bricks settings'

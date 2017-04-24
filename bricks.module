@@ -225,9 +225,8 @@ function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $
       'group' => $order_class,
     );
 
-    $variables['table']['#attached']['drupalSettings']['bricks']['nesting'] = bricks_get_nesting_data($element['#entity_type']);
-    $variables['table']['#attached']['library'][] = 'bricks/nesting-validation';
-    $variables['table']['#attached']['library'][] = 'bricks/tabledrag.relationship-all';
+    $variables['table']['#attached']['drupalSettings']['bricks']['nesting'] = _bricks_get_nesting_data($element['#entity_type']);
+    $variables['table']['#attached']['library'][] = 'bricks/tabledrag.bricks';
   }
 }
 
@@ -268,7 +267,7 @@ function _bricks_form_element_alter(&$element, $item, $entity_type) {
 /**
  * Returns the nesting settings in a format that the javascript can handle.
  */
-function bricks_get_nesting_data($return_entity_type = NULL) {
+function _bricks_get_nesting_data($return_entity_type = NULL) {
   $bricks_settings = \Drupal::config('bricks.settings');
   $nesting_data = $bricks_settings->get('nesting');
 

@@ -1,10 +1,6 @@
-tabledrag.relationship-all:
+tabledrag.bricks:
   js:
-    js/tabledrag.relationship-all.js: {}
-
-nesting-validation:
-  js:
-    js/nesting-validation.js: {}
+    js/tabledrag.bricks.js: {}
   dependencies:
     - core/jquery
     - core/drupal

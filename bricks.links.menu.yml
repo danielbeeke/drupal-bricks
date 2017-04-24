@@ -1,5 +1,5 @@
 bricks.settings:
   title: 'Bricks settings'
-  parent: system.admin_config_media
+  parent: system.admin_structure
   description: 'Configure how bricks behave.'
   route_name: bricks.config
