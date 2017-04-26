@@ -3,10 +3,19 @@
         attach: function (context, settings) {
 
             if (Drupal.tableDrag) {
-
-                var mayNestByBundle = function (rowBundle, possibleParentBundle) {
-                    return $.inArray(possibleParentBundle, settings.bricks.nesting[rowBundle]) !== -1;
+                /**
+                 * Validates if the current row may be nested inside another row.
+                 *
+                 * @param {HTMLElement} otherRow
+                 *   The row to validate, can be somewhere else in the tree because of dragging around.
+                 *
+                 * @return {boolean}
+                 *   Whether the nesting is valid.
+                 */
+                Drupal.tableDrag.prototype.row.prototype.mayBeNestedInRow = function(otherRow) {
+                    return $.inArray(otherRow.dataset.bundle, settings.bricks.nesting[this.element.dataset.bundle]) !== -1;
                 };
+
 
                 /**
                  * Validate an indent action, bricks validation specific.
@@ -22,7 +31,7 @@
                  *   positive or negative). This number will be adjusted to nearest valid
                  *   indentation level for the row.
                  *
-                 * @return {bool}
+                 * @return {boolean}
                  *   Whether the indent is valid.
                  */
                 Drupal.tableDrag.prototype.row.prototype.validIndent = function (prevRow, nextRow, indentDiff) {
@@ -31,9 +40,7 @@
 
                     // The current is being nested under the next one.
                     if (ownRowDepth + indentDiff > prevRowDepth) {
-                        var ownRowBundle = this.element.dataset.bundle;
-                        var prevRowBundle = prevRow.dataset.bundle;
-                        return mayNestByBundle(ownRowBundle, prevRowBundle);
+                        return this.mayBeNestedInRow(prevRow);
                     }
 
                     return true;
@@ -98,7 +105,7 @@
                  * @param {HTMLElement} row
                  *   DOM object for the row being considered for swapping.
                  *
-                 * @return {bool}
+                 * @return {boolean}
                  *   Whether the swap is a valid swap or not.
                  */
                 Drupal.tableDrag.prototype.row.prototype.isValidSwap = function (row) {
@@ -118,13 +125,8 @@
                         var prevRowDepth = $(prevRow).find('.js-indentation').length;
                         var ownRowDepth = this.indents;
 
-                        if (ownRowDepth > prevRowDepth && prevRowDepth != 0) {
-                            var ownRowBundle = this.element.dataset.bundle;
-                            var prevRowBundle = prevRow.dataset.bundle;
-
-                            if (!mayNestByBundle(ownRowBundle, prevRowBundle)) {
-                                return false;
-                            }
+                        if (ownRowDepth > prevRowDepth && prevRowDepth !== 0) {
+                            return this.mayBeNestedInRow(prevRow);
                         }
 
                         // We have an invalid swap if the valid indentations interval is empty.
@@ -158,7 +160,6 @@
                     if (rowSettings.relationship === 'all') {
                         var siblings = [];
                         var directions = ['prev', 'next'];
-                        var rowIndentation = this.indents;
                         for (var d = 0; d < directions.length; d++) {
                             var checkRow = $(this.element)[directions[d]]();
                             while (checkRow.length) {
@@ -173,7 +174,7 @@
                             }
                             // Since siblings are added in reverse order for previous, reverse the
                             // completed list of previous siblings. Add the current row and continue.
-                            if (directions[d] == 'prev') {
+                            if (directions[d] === 'prev') {
                                 siblings.reverse();
                                 siblings.push(this.element);
                             }
