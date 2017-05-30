@@ -13,6 +13,7 @@
                  *   Whether the nesting is valid.
                  */
                 Drupal.tableDrag.prototype.row.prototype.mayBeNestedInRow = function(otherRow) {
+                    if (!otherRow) { return false; }
                     return $.inArray(otherRow.dataset.bundle, settings.bricks.nesting[this.element.dataset.bundle]) !== -1;
                 };
 
@@ -38,8 +39,28 @@
                     var ownRowDepth = this.indents;
                     var prevRowDepth = $(prevRow).find('.js-indentation').length;
 
+                    if (indentDiff > 1 || indentDiff < -1) {
+                        return false;
+                    }
+
+                    // The dragged row is placed at the same level as the parent.
+                    // If the parent has children, then we must not accept.
+                    if (ownRowDepth + indentDiff === prevRowDepth) {
+                        var parent = this.getHierarchyParent(prevRow);
+
+                        if (!parent) {
+                            return true;
+                        }
+
+                        return this.mayBeNestedInRow(parent) && !this.hasHierarchyChildren(prevRow);
+                    }
+
                     // The current is being nested under the next one.
-                    if (ownRowDepth + indentDiff > prevRowDepth) {
+                    if (ownRowDepth + indentDiff === prevRowDepth - 1) {
+                        return this.mayBeNestedInRow(prevRow);
+                    }
+
+                    if (ownRowDepth === prevRowDepth - indentDiff) {
                         return this.mayBeNestedInRow(prevRow);
                     }
 
@@ -108,6 +129,65 @@
                  * @return {boolean}
                  *   Whether the swap is a valid swap or not.
                  */
+                Drupal.tableDrag.prototype.row.prototype.hasHierarchyChildren = function (row) {
+                    var rowDepth = $(row).find('.js-indentation').length;
+                    var pointer = row;
+                    var hasChildren = false;
+
+                    while (pointer) {
+                        var currentDepth = $(pointer).find('.js-indentation').length;
+
+                        if (currentDepth > rowDepth) {
+                            hasChildren = true;
+                            pointer = false;
+                        }
+                        else if (currentDepth === rowDepth) {
+                            pointer = false;
+                        }
+                        else {
+                            pointer = $(pointer).next('tr')[0];
+                        }
+                    }
+
+                    return hasChildren;
+                };
+
+                /**
+                 * Ensure that two rows are allowed to be swapped.
+                 *
+                 * @param {HTMLElement} row
+                 *   DOM object for the row being considered for swapping.
+                 *
+                 * @return {boolean}
+                 *   Whether the swap is a valid swap or not.
+                 */
+                Drupal.tableDrag.prototype.row.prototype.getHierarchyParent = function (row) {
+                    var rowDepth = $(row).find('.js-indentation').length;
+                    var pointer = row;
+                    var parent = false;
+
+                    while (pointer) {
+                        var currentDepth = $(pointer).find('.js-indentation').length;
+
+                        if (currentDepth < rowDepth && !parent) {
+                            parent = pointer;
+                        }
+
+                        pointer = $(pointer).prev('tr')[0];
+                    }
+
+                    return parent;
+                };
+
+                /**
+                 * Ensure that two rows are allowed to be swapped.
+                 *
+                 * @param {HTMLElement} row
+                 *   DOM object for the row being considered for swapping.
+                 *
+                 * @return {boolean}
+                 *   Whether the swap is a valid swap or not.
+                 */
                 Drupal.tableDrag.prototype.row.prototype.isValidSwap = function (row) {
                     var $row = $(row);
                     if (this.indentEnabled) {
@@ -121,12 +201,40 @@
                             prevRow = $row.prev('tr').get(0);
                             nextRow = row;
                         }
+
                         this.interval = this.validIndentInterval(prevRow, nextRow);
                         var prevRowDepth = $(prevRow).find('.js-indentation').length;
                         var ownRowDepth = this.indents;
 
-                        if (ownRowDepth > prevRowDepth && prevRowDepth !== 0) {
+                        if (!prevRow) {
+                            return true;
+                        }
+
+                        if (ownRowDepth + 1 === prevRowDepth) {
+                            var parent = this.getHierarchyParent(row);
+                            return this.mayBeNestedInRow(parent);
+                        }
+
+                        if (ownRowDepth - 1 === prevRowDepth) {
                             return this.mayBeNestedInRow(prevRow);
+                        }
+
+                        if (ownRowDepth === prevRowDepth) {
+                            var nextRowDepth = $(nextRow).find('.js-indentation').length;
+
+                            // console.log(nextRowDepth, nextRow, this.hasHierarchyChildren(nextRow))
+
+                            // console.log(prevRow)  && this.hasHierarchyChildren(prevRow)
+
+                            if (!this.mayBeNestedInRow(prevRow)) {
+                                return false;
+                            }
+                        }
+
+                        var parent = this.getHierarchyParent(prevRow);
+
+                        if (parent) {
+                            return this.mayBeNestedInRow(parent);
                         }
 
                         // We have an invalid swap if the valid indentations interval is empty.
