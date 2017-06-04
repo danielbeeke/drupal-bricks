@@ -55,6 +55,10 @@
                         return this.mayBeNestedInRow(parent) && !this.hasHierarchyChildren(prevRow);
                     }
 
+                    if (ownRowDepth === prevRowDepth && indentDiff === 1) {
+                        return this.mayBeNestedInRow(prevRow);
+                    }
+
                     // The current is being nested under the next one.
                     if (ownRowDepth + indentDiff === prevRowDepth - 1) {
                         return this.mayBeNestedInRow(prevRow);
