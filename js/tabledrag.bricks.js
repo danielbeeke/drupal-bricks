@@ -22,7 +22,9 @@
                         var x = self.currentPointerCoords.x - self.dragObject.initOffset.x;
                         var swapCommand = [];
                         var indentCommand = [];
-                        var validated = true;
+                        var bothValidated = false;
+                        var indentValidated = false;
+                        var swapValidated = false;
 
                         // Check for row swapping and vertical scrolling.
                         if (y !== self.oldY) {
@@ -65,33 +67,50 @@
                         }
 
                         if (swapCommand.length || indentCommand.length) {
-                            var changes = {};
+                            var swap = {};
+                            var indent = {};
 
                             if (swapCommand.length) {
-                                var a = self.rowObject.element;
-                                var b = swapCommand[1];
-                                changes.swap = {
-                                    a: a,
-                                    b: b
-                                }
+                                swap = {
+                                    a: self.rowObject.element,
+                                    b: swapCommand[1]
+                                };
+
+                                Drupal.tableDrag.setParents(self.table, {
+                                    swap: swap
+                                });
+
+                                swapValidated = Drupal.tableDrag.validateHierarchy(self.table);
                             }
 
                             if (indentCommand.length) {
-                                changes.indent = {
+                                indent = {
                                     row: self.rowObject.element,
                                     indentDiff: indentCommand[0]
-                                }
+                                };
+
+                                Drupal.tableDrag.setParents(self.table, {
+                                    indent: indent
+                                });
+
+                                indentValidated = Drupal.tableDrag.validateHierarchy(self.table);
                             }
 
-                            Drupal.tableDrag.setParents(self.table, changes);
-                            validated = Drupal.tableDrag.validateHierarchy(self.table);
+                            if (swapCommand.length && indentCommand.length) {
+                                Drupal.tableDrag.setParents(self.table, {
+                                    swap: swap,
+                                    indent: indent
+                                });
+
+                                bothValidated = Drupal.tableDrag.validateHierarchy(self.table);
+                            }
                         }
 
-                        if (swapCommand.length && validated) {
+                        if (swapCommand.length && (bothValidated || swapValidated)) {
                             self.rowObject.swap.apply(self.rowObject, swapCommand);
                         }
 
-                        if (indentCommand.length && validated) {
+                        if (indentCommand.length && (bothValidated || indentValidated)) {
                             var indentChange = self.rowObject.indent.apply(self.rowObject, indentCommand);
                             // Update table and pointer indentations.
                             self.dragObject.indentPointerPos.x += self.indentAmount * indentChange * self.rtl;
