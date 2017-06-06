@@ -3,256 +3,171 @@
         attach: function (context, settings) {
 
             if (Drupal.tableDrag) {
-                /**
-                 * Validates if the current row may be nested inside another row.
-                 *
-                 * @param {HTMLElement} otherRow
-                 *   The row to validate, can be somewhere else in the tree because of dragging around.
-                 *
-                 * @return {boolean}
-                 *   Whether the nesting is valid.
-                 */
-                Drupal.tableDrag.prototype.row.prototype.mayBeNestedInRow = function(otherRow) {
-                    if (!otherRow) { return false; }
-                    return $.inArray(otherRow.dataset.bundle, settings.bricks.nesting[this.element.dataset.bundle]) !== -1;
-                };
-
 
                 /**
-                 * Validate an indent action, bricks validation specific.
+                 * Pointer movement handler, bound to document.
                  *
-                 * @param {HTMLElement} prevRow
-                 *   The previous row.
+                 * @param {jQuery.Event} event
+                 *   The pointer event.
+                 * @param {Drupal.tableDrag} self
+                 *   The tableDrag instance.
                  *
-                 * @param {HTMLElement} nextRow
-                 *   The next row.
-                 *
-                 * @param {number} indentDiff
-                 *   The number of additional indentations proposed for the row (can be
-                 *   positive or negative). This number will be adjusted to nearest valid
-                 *   indentation level for the row.
-                 *
-                 * @return {boolean}
-                 *   Whether the indent is valid.
+                 * @return {bool|undefined}
+                 *   Undefined if no dragObject is defined, false otherwise.
                  */
-                Drupal.tableDrag.prototype.row.prototype.validIndent = function (prevRow, nextRow, indentDiff) {
-                    var ownRowDepth = this.indents;
-                    var prevRowDepth = $(prevRow).find('.js-indentation').length;
+                Drupal.tableDrag.prototype.dragRow = function (event, self) {
+                    if (self.dragObject) {
+                        self.currentPointerCoords = self.pointerCoords(event);
+                        var y = self.currentPointerCoords.y - self.dragObject.initOffset.y;
+                        var x = self.currentPointerCoords.x - self.dragObject.initOffset.x;
+                        var swapCommand = [];
+                        var indentCommand = [];
+                        var validated = true;
 
-                    if (indentDiff > 1 || indentDiff < -1) {
-                        return false;
-                    }
+                        // Check for row swapping and vertical scrolling.
+                        if (y !== self.oldY) {
+                            self.rowObject.direction = y > self.oldY ? 'down' : 'up';
+                            // Update the old value.
+                            self.oldY = y;
+                            // Check if the window should be scrolled (and how fast).
+                            var scrollAmount = self.checkScroll(self.currentPointerCoords.y);
+                            // Stop any current scrolling.
+                            clearInterval(self.scrollInterval);
+                            // Continue scrolling if the mouse has moved in the scroll direction.
+                            if (scrollAmount > 0 && self.rowObject.direction === 'down' || scrollAmount < 0 && self.rowObject.direction === 'up') {
+                                self.setScroll(scrollAmount);
+                            }
 
-                    // The dragged row is placed at the same level as the parent.
-                    // If the parent has children, then we must not accept.
-                    if (ownRowDepth + indentDiff === prevRowDepth) {
-                        var parent = this.getHierarchyParent(prevRow);
-
-                        if (!parent) {
-                            return true;
-                        }
-
-                        return this.mayBeNestedInRow(parent) && !this.hasHierarchyChildren(prevRow);
-                    }
-
-                    if (ownRowDepth === prevRowDepth && indentDiff === 1) {
-                        return this.mayBeNestedInRow(prevRow);
-                    }
-
-                    // The current is being nested under the next one.
-                    if (ownRowDepth + indentDiff === prevRowDepth - 1) {
-                        return this.mayBeNestedInRow(prevRow);
-                    }
-
-                    if (ownRowDepth === prevRowDepth - indentDiff) {
-                        return this.mayBeNestedInRow(prevRow);
-                    }
-
-                    return true;
-                };
-
-                /**
-                 * Indent a row within the legal bounds of the table.
-                 *
-                 * @param {number} indentDiff
-                 *   The number of additional indentations proposed for the row (can be
-                 *   positive or negative). This number will be adjusted to nearest valid
-                 *   indentation level for the row.
-                 *
-                 * @return {number}
-                 *   The number of indentations applied.
-                 */
-                Drupal.tableDrag.prototype.row.prototype.indent = function (indentDiff) {
-                    var $group = $(this.group);
-                    var prevRow = $(this.element).prev('tr').get(0);
-                    var nextRow = $group.eq(-1).next('tr').get(0);
-
-                    // Determine the valid indentations interval if not available yet.
-                    if (!this.interval) {
-                        this.interval = this.validIndentInterval(prevRow, nextRow);
-                    }
-
-                    // Adjust to the nearest valid indentation.
-                    var indent = this.indents + indentDiff;
-                    indent = Math.max(indent, this.interval.min);
-                    indent = Math.min(indent, this.interval.max);
-                    indentDiff = indent - this.indents;
-
-                    if (indentDiff && !this.validIndent(prevRow, nextRow, indentDiff)) {
-                        return false;
-                    }
-
-                    for (var n = 1; n <= Math.abs(indentDiff); n++) {
-                        // Add or remove indentations.
-                        if (indentDiff < 0) {
-                            $group.find('.js-indentation:first-of-type').remove();
-                            this.indents--;
-                        }
-                        else {
-                            $group.find('td:first-of-type').prepend(Drupal.theme('tableDragIndentation'));
-                            this.indents++;
-                        }
-                    }
-                    if (indentDiff) {
-                        // Update indentation for this row.
-                        this.changed = true;
-                        this.groupDepth += indentDiff;
-                        this.onIndent();
-                    }
-
-                    return indentDiff;
-                };
-
-
-                /**
-                 * Ensure that two rows are allowed to be swapped.
-                 *
-                 * @param {HTMLElement} row
-                 *   DOM object for the row being considered for swapping.
-                 *
-                 * @return {boolean}
-                 *   Whether the swap is a valid swap or not.
-                 */
-                Drupal.tableDrag.prototype.row.prototype.hasHierarchyChildren = function (row) {
-                    var rowDepth = $(row).find('.js-indentation').length;
-                    var pointer = row;
-                    var hasChildren = false;
-
-                    while (pointer) {
-                        var currentDepth = $(pointer).find('.js-indentation').length;
-
-                        if (currentDepth > rowDepth) {
-                            hasChildren = true;
-                            pointer = false;
-                        }
-                        else if (currentDepth === rowDepth) {
-                            pointer = false;
-                        }
-                        else {
-                            pointer = $(pointer).next('tr')[0];
-                        }
-                    }
-
-                    return hasChildren;
-                };
-
-                /**
-                 * Ensure that two rows are allowed to be swapped.
-                 *
-                 * @param {HTMLElement} row
-                 *   DOM object for the row being considered for swapping.
-                 *
-                 * @return {boolean}
-                 *   Whether the swap is a valid swap or not.
-                 */
-                Drupal.tableDrag.prototype.row.prototype.getHierarchyParent = function (row) {
-                    var rowDepth = $(row).find('.js-indentation').length;
-                    var pointer = row;
-                    var parent = false;
-
-                    while (pointer) {
-                        var currentDepth = $(pointer).find('.js-indentation').length;
-
-                        if (currentDepth < rowDepth && !parent) {
-                            parent = pointer;
-                        }
-
-                        pointer = $(pointer).prev('tr')[0];
-                    }
-
-                    return parent;
-                };
-
-                /**
-                 * Ensure that two rows are allowed to be swapped.
-                 *
-                 * @param {HTMLElement} row
-                 *   DOM object for the row being considered for swapping.
-                 *
-                 * @return {boolean}
-                 *   Whether the swap is a valid swap or not.
-                 */
-                Drupal.tableDrag.prototype.row.prototype.isValidSwap = function (row) {
-                    var $row = $(row);
-                    if (this.indentEnabled) {
-                        var prevRow;
-                        var nextRow;
-                        if (this.direction === 'down') {
-                            prevRow = row;
-                            nextRow = $row.next('tr').get(0);
-                        }
-                        else {
-                            prevRow = $row.prev('tr').get(0);
-                            nextRow = row;
-                        }
-
-                        this.interval = this.validIndentInterval(prevRow, nextRow);
-                        var prevRowDepth = $(prevRow).find('.js-indentation').length;
-                        var ownRowDepth = this.indents;
-
-                        if (!prevRow) {
-                            return true;
-                        }
-
-                        if (ownRowDepth + 1 === prevRowDepth) {
-                            var parent = this.getHierarchyParent(row);
-                            return this.mayBeNestedInRow(parent);
-                        }
-
-                        if (ownRowDepth - 1 === prevRowDepth) {
-                            return this.mayBeNestedInRow(prevRow);
-                        }
-
-                        if (ownRowDepth === prevRowDepth) {
-                            var nextRowDepth = $(nextRow).find('.js-indentation').length;
-
-                            // console.log(nextRowDepth, nextRow, this.hasHierarchyChildren(nextRow))
-
-                            // console.log(prevRow)  && this.hasHierarchyChildren(prevRow)
-
-                            if (!this.mayBeNestedInRow(prevRow)) {
-                                return false;
+                            // If we have a valid target, perform the swap and restripe the table.
+                            var currentRow = self.findDropTargetRow(x, y);
+                            if (currentRow) {
+                                if (self.rowObject.direction === 'down') {
+                                    swapCommand = ['after', currentRow, self];
+                                }
+                                else {
+                                    swapCommand = ['before', currentRow, self];
+                                }
+                                if (self.striping === true) {
+                                    self.restripeTable();
+                                }
                             }
                         }
 
-                        var parent = this.getHierarchyParent(prevRow);
-
-                        if (parent) {
-                            return this.mayBeNestedInRow(parent);
+                        // Similar to row swapping, handle indentations.
+                        if (self.indentEnabled) {
+                            var xDiff = self.currentPointerCoords.x - self.dragObject.indentPointerPos.x;
+                            // Set the number of indentations the pointer has been moved left or
+                            // right.
+                            var indentDiff = Math.round(xDiff / self.indentAmount);
+                            // Indent the row with our estimated diff, which may be further
+                            // restricted according to the rows around this row.
+                            indentCommand = [indentDiff];
                         }
 
-                        // We have an invalid swap if the valid indentations interval is empty.
-                        if (this.interval.min > this.interval.max) {
-                            return false;
-                        }
-                    }
+                        if (swapCommand.length || indentCommand.length) {
+                            var changes = {};
 
-                    // Do not let an un-draggable first row have anything put before it.
-                    if (this.table.tBodies[0].rows[0] === row && $row.is(':not(.draggable)')) {
+                            if (swapCommand.length) {
+                                var a = self.rowObject.element;
+                                var b = swapCommand[1];
+                                changes.swap = {
+                                    a: a,
+                                    b: b
+                                }
+                            }
+
+                            if (indentCommand.length) {
+                                changes.indent = {
+                                    row: self.rowObject.element,
+                                    indentDiff: indentCommand[0]
+                                }
+                            }
+
+                            Drupal.tableDrag.setParents(self.table, changes);
+                            validated = Drupal.tableDrag.validateHierarchy(self.table);
+                        }
+
+                        if (swapCommand.length && validated) {
+                            self.rowObject.swap.apply(self.rowObject, swapCommand);
+                        }
+
+                        if (indentCommand.length && validated) {
+                            var indentChange = self.rowObject.indent.apply(self.rowObject, indentCommand);
+                            // Update table and pointer indentations.
+                            self.dragObject.indentPointerPos.x += self.indentAmount * indentChange * self.rtl;
+                            self.indentCount = Math.max(self.indentCount, self.rowObject.indents);
+                        }
+
                         return false;
                     }
+                };
 
-                    return true;
+                Drupal.tableDrag.setParents = function (table, changes) {
+                    var previousDepths = {};
+
+                    // Add _parent to each row.
+                    $('tbody tr', table).each(function (index, row) {
+                        var previousRow = $(row).prev('tr')[0];
+                        var previousIndents = $('.js-indentation', previousRow).length;
+                        var currentIndents = $('.js-indentation', row).length;
+                        row._indents = currentIndents;
+
+                        // Simulation for indent change, with the indentDiff.
+                        if (changes && changes.indent && changes.indent.indentDiff) {
+                            if (previousRow === changes.indent.row) {
+                                previousIndents = previousIndents + changes.indent.indentDiff;
+                            }
+
+                            else if (row === changes.indent.row) {
+                                currentIndents = currentIndents + changes.indent.indentDiff;
+                            }
+                        }
+
+                        // Simulation for swapping.
+                        if (changes && changes.swap) {
+                            if (previousRow === changes.swap.a) {
+                                previousRow = changes.swap.b;
+                            }
+
+                            else if (row === changes.swap.a) {
+                                row = changes.swap.b;
+                            }
+                        }
+
+                        if (!previousRow) {
+                            row._parent = null;
+                        }
+                        else if (currentIndents === previousIndents + 1) {
+                            row._parent = previousRow;
+                        }
+                        else if (currentIndents === previousIndents) {
+                            row._parent = previousRow._parent;
+                        }
+                        else if (currentIndents < previousIndents) {
+                            row._parent = previousDepths[currentIndents - 1];
+                        }
+
+                        previousDepths[currentIndents] = row;
+                    });
+                };
+
+                Drupal.tableDrag.validateHierarchy = function (table) {
+                    var validated = true;
+
+                    $('tbody tr', table).each(function (index, row) {
+                        if (row._parent) {
+                            if ($.inArray(row._parent.dataset.bundle, settings.bricks.nesting[row.dataset.bundle]) === -1) {
+                                validated = false;
+                                return false;
+                            }
+                        }
+                        else if (row._indents) {
+                            validated = false;
+                            return false;
+                        }
+                    });
+
+                    return validated;
                 };
 
                 /**
