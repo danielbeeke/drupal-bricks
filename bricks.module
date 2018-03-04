@@ -1,8 +1,13 @@
 <?php
 
+/**
+ * @file
+ * {@inheritdoc}
+ */
+
 use Drupal\Core\Render\Element;
 use Drupal\Core\TypedData\DataDefinition;
-
+use Drupal\Component\Utility\Html;
 
 /* BRICKS STORAGE */
 
@@ -21,70 +26,21 @@ function _bricks_field_properties_alter(&$properties) {
  * Helper function for FieldItemInterface::schema().
  */
 function _bricks_field_schema_alter(&$schema) {
-  $schema['columns']['depth'] = array(
+  $schema['columns']['depth'] = [
     'type' => 'int',
     'size' => 'tiny',
     'unsigned' => TRUE,
-  );
+  ];
 
-  $schema['columns']['options'] = array(
+  $schema['columns']['options'] = [
     'type' => 'blob',
     'size' => 'normal',
     'not null' => FALSE,
     'serialize' => TRUE,
-  );
-}
-
-
-/* BRICKS FORMATTING */
-
-/**
- * Implements hook_theme().
- */
-function bricks_theme($existing, $type, $theme, $path) {
-  return [
-    'eck_entity__brick' => [
-      'base hook' => 'eck_entity',
-    ],
-    'eck_entity__brick__columns' => [
-      'base hook' => 'eck_entity',
-    ],
   ];
 }
 
-/**
- * Prepares variables for `eck-entity.html.twig`.
- */
-function bricks_preprocess_eck_entity(&$variables) {
-  if (!empty($variables['entity']['field_childs']) && Element::children($variables['entity']['field_childs'])) {
-    $variables['entity']['childs'] = array_intersect_key($variables['entity']['field_childs'], Element::children($variables['entity']['field_childs']));
-  }
-}
-
-/**
- * Prepares variables for `paragraph.html.twig`.
- */
-function bricks_preprocess_paragraph(&$variables) {
-  if ($variables['content']['childs']) {
-    $paragraph = $variables['elements']['#paragraph'];
-    if ($field_name = _bricks_first_entity_reference_field_name($paragraph)) {
-      $variables['content'][$field_name] = $variables['content']['childs'];
-      unset($variables['content']['childs']);
-    }
-  }
-}
-
-/**
- * Helper function: returns a name of the first field of type entity_reference(_revisions).
- */
-function _bricks_first_entity_reference_field_name($entity) {
-  foreach ($entity->getFieldDefinitions() as $field_name => $field_definition) {
-    if (!$field_definition->getFieldStorageDefinition()->isBaseField()
-      && in_array($field_definition->getType(), ['entity_reference', 'entity_reference_revisions'])) {
-      return $field_name;
-    }
-  }
-}
+/* BRICKS FORMATTING */
 
 /**
  * Prepares variables for `field.html.twig`.
@@ -92,7 +48,7 @@ function _bricks_first_entity_reference_field_name($entity) {
 function bricks_preprocess_field(&$variables) {
   $element = $variables['element'];
 
-  if ($element['#formatter'] == 'bricks_nested') {
+  if (in_array($element['#formatter'], ['bricks_nested', 'bricks_nested_dynamic'])) {
     $variables['items'] = [
       [
         'content' => _bricks_nest_items($element, $variables['items']),
@@ -107,38 +63,51 @@ function bricks_preprocess_field(&$variables) {
 function _bricks_nest_items($element, $items) {
 
   // Prepare items:
-  $parents = array(-1);
+  $parents = [-1];
   $prev_depth = 0;
   foreach ($items as $delta => $item) {
     $depth = $element['#items'][$delta]->depth;
     if ($depth > $prev_depth) {
       array_unshift($parents, $delta - 1);
     }
-    else if ($depth < $prev_depth) {
+    elseif ($depth < $prev_depth) {
       array_splice($parents, 0, $prev_depth - $depth);
     }
     $prev_depth = $depth;
 
     $items[$delta] = $items[$delta]['content'];
+    $items[$delta]['#label'] = $element['#items'][$delta]->entity->label();
     $items[$delta]['#delta'] = $delta;
     $items[$delta]['#parent_delta'] = $parents[0];
+    $items[$delta]['#attributes']['class'][] = 'brick';
+    $items[$delta]['#attributes']['class'][] = 'brick--type--' . Html::cleanCssIdentifier($element['#items'][$delta]->entity->bundle());
+    $items[$delta]['#attributes']['class'][] = 'brick--id--' . $element['#items'][$delta]->entity->id();
 
-    $items[$delta]['childs'] = array();
+    $items[$delta]['childs'] = [];
     if (!empty($element['#items'][$delta]->options['view_mode'])) {
       $items[$delta]['#view_mode'] = $element['#items'][$delta]->options['view_mode'];
+    }
+    if (!empty($element['#items'][$delta]->options['layout'])) {
+      $items[$delta]['#layout'] = $element['#items'][$delta]->options['layout'];
     }
     if (!empty($element['#items'][$delta]->options['css_class'])) {
       $items[$delta]['#attributes']['class'][] = $element['#items'][$delta]->options['css_class'];
     }
 
     // Disable entity render cache, rely on field cache:
-    $items[$delta]['#cache'] = array('disabled' => TRUE);
+    $items[$delta]['#cache'] = ['disabled' => TRUE];
   }
 
   // Process items in reverse order (without recursion):
   $rdeltas = array_reverse(array_keys($items));
   foreach ($rdeltas as $delta) {
     $parent_delta = $items[$delta]['#parent_delta'];
+
+    if (!empty($items[$delta]['#layout']) && \Drupal::service('module_handler')->moduleExists('layout_discovery')) {
+      $items[$delta] = array_intersect_key($items[$delta], array_flip(['#label', '#attributes'])) +
+        _bricks_build_layout_from_items($items[$delta]['#layout'], $items[$delta]['childs']);
+    }
+
     if ($parent_delta != -1) {
       array_unshift($items[$parent_delta]['childs'], $items[$delta]);
       unset($items[$delta]);
@@ -148,6 +117,31 @@ function _bricks_nest_items($element, $items) {
   return $items;
 }
 
+/**
+ * Helper function for layout handling in _bricks_nest_items().
+ */
+function _bricks_build_layout_from_items($layout, $items) {
+  $layoutPluginManager = \Drupal::service('plugin.manager.core.layout');
+  if (!$layoutPluginManager->hasDefinition($layout)) {
+    drupal_set_message(t('Layout `%layout_id` is unknown.', ['%layout_id' => $layout]), 'warning');
+    return;
+  }
+
+  // Provide any configuration to the layout plugin if necessary.
+  $layoutInstance = $layoutPluginManager->createInstance($layout);
+  $regionNames = $layoutInstance->getPluginDefinition()->getRegionNames();
+
+  // Adjust the lengths:
+  $count = min(count($regionNames), count($items));
+  $regionNames = array_slice($regionNames, 0, $count);
+  $items = array_slice($items, 0, $count);
+
+  // Build the content for your regions.
+  $regions = array_combine($regionNames, $items);
+
+  // This builds the render array.
+  return $layoutInstance->build($regions);
+}
 
 /* BRICKS EDITING */
 
@@ -167,10 +161,49 @@ function bricks_field_widget_info_alter(array &$info) {
 }
 
 /**
+ * Implements hook_field_widget_WIDGET_TYPE_form_alter() for `entity_reference_autocomplete`.
+ */
+function bricks_field_widget_entity_reference_autocomplete_form_alter(&$element, \Drupal\Core\Form\FormStateInterface $form_state, $context) {
+  $field_type = $context['items']->getFieldDefinition()->getType();
+
+  // @TODO: Replace by 'Nested bricks' widget setting.
+  if (in_array($field_type, ['bricks'])) {
+    // @TODO: Find a better way to be used in _bricks_preprocess_tabledrag_form().
+    $element['#widget'] = 'entity_reference_autocomplete';
+    // #default_value is en Entity or NULL.
+    _bricks_form_element_alter($element, $context['items'][$context['delta']], $element['target_id']['#default_value']);
+    hide($element['depth']);
+  }
+}
+/**
+ * Implements hook_field_widget_WIDGET_TYPE_form_alter() for `bricks_tree_autocomplete`.
+ */
+function bricks_field_widget_bricks_tree_autocomplete_form_alter(&$element, \Drupal\Core\Form\FormStateInterface $form_state, $context) {
+  bricks_field_widget_entity_reference_autocomplete_form_alter($element, $form_state, $context);
+}
+
+/**
+ * Implements hook_field_widget_WIDGET_TYPE_form_alter() for `paragraphs`.
+ */
+function bricks_field_widget_paragraphs_form_alter(&$element, \Drupal\Core\Form\FormStateInterface $form_state, $context) {
+  $field_type = $context['items']->getFieldDefinition()->getType();
+
+  // @TODO: Replace by 'Nested bricks' widget setting.
+  if (in_array($field_type, ['bricks_revisioned'])) {
+    // @TODO: Find a better way to be used in _bricks_preprocess_tabledrag_form().
+    $element['#widget'] = 'paragraphs';
+    $item = $context['items'][$context['delta']];
+    _bricks_form_element_alter($element, $item, entity_load('paragraph', $item->target_id));
+    hide($element['depth']);
+  }
+}
+
+/**
  * Prepares variables for `field-multiple-value-form.html.twig`.
  */
 function bricks_preprocess_field_multiple_value_form(&$variables) {
-  _bricks_preprocess_tabledrag_form($variables, 'element', 'bricks_tree_autocomplete', $variables['element']['#field_name'] . '-delta-order');
+  _bricks_preprocess_tabledrag_form($variables, 'element', 'entity_reference_autocomplete', $variables['element']['#field_name'] . '-delta-order');
+  _bricks_preprocess_tabledrag_form($variables, 'element', 'paragraphs', $variables['element']['#field_name'] . '-delta-order');
 }
 
 /**
@@ -179,53 +212,67 @@ function bricks_preprocess_field_multiple_value_form(&$variables) {
 function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $order_class, $render_options = FALSE) {
   $element = $variables[$element_key];
 
-  if (isset($element['#widget']) && $element['#widget'] == $widget) {
-    $variables['table']['#header'][0]['style'] = 'min-width: 100px'; // @TODO: Tmp hack for the proper indent width calculation.
-      $variables['table']['#header'][] = ['data' => t('Depth'), 'class' => ['bricks-depth-header']];
+  // @TODO: Replace by 'Nested bricks' widget setting.
+  if (isset($element['#widget']) && $element['#widget'] == $widget ||
+    isset($element[0]['#widget']) && $element[0]['#widget'] == $widget) {
+    // @TODO: Tmp hack for the proper indent width calculation.
+    $variables['table']['#header'][0]['style'] = 'min-width: 150px';
+    $variables['table']['#header'][] = ['data' => t('Depth'), 'class' => ['bricks-depth-header']];
 
-    foreach (Element::children($element) as $key) {
-      if ($key !== 'add_more') {
+    $row = 0;
+    foreach (Element::children($element) as $i => $key) {
+      if ($key !== 'add_more' && $key !== 'header_actions') {
         $depth = $element[$key]['depth']['#value'];
 
-        $variables['table']['#rows'][$key]['data-bundle'] = $element[$key]['#entity']->bundle();
+        if (isset($element[$key]['#entity'])) {
+            $variables['table']['#rows'][$key]['data-bundle'] = $element[$key]['#entity']->bundle();
+        }
+        $indentation = [];
 
-        $indentation = array();
         if ($depth > 0) {
-          $indentation = array(
+          $indentation = [
             '#theme' => 'indentation',
             '#size' => $depth,
-          );
+          ];
         }
 
-        $drag_cell = &$variables['table']['#rows'][$key]['data'][0];
+        $drag_cell = &$variables['table']['#rows'][$row]['data'][0];
         $drag_cell['data'] = !empty($indentation) ? drupal_render($indentation) : '' . $drag_cell['data'];
-        $drag_cell['style'] = 'width: initial'; // @TODO
+        // @TODO
+        $drag_cell['style'] = 'width: auto; min-width: 150px';
 
         show($element[$key]['depth']);
-          $variables['table']['#rows'][$key]['data'][] = \Drupal::service('renderer')->render($element[$key]['depth']);
+        $variables['table']['#rows'][$row]['data'][] = \Drupal::service('renderer')->render($element[$key]['depth']);
 
-        if ($render_options) { // @TODO: Get rid of $render_options hack.
-          $element[$key]['options']['#prefix'] = $variables['table']['#rows'][$key]['data'][2]['data'];
-          $variables['table']['#rows'][$key]['data'][2]['data'] = \Drupal::service('renderer')->render($element[$key]['options']);
+        // @TODO: Get rid of $render_options hack.
+        if ($render_options) {
+          $element[$key]['options']['#prefix'] = $variables['table']['#rows'][$row]['data'][2]['data'];
+          $variables['table']['#rows'][$row]['data'][2]['data'] = \Drupal::service('renderer')->render($element[$key]['options']);
         }
+
+      }
+      if ($key !== 'add_more') {
+        $row++;
       }
     }
 
     $tabledrag_options = &$variables['table']['#tabledrag'];
     $tabledrag_options[0]['relationship'] = 'all';
-    $tabledrag_options[] = array(
+    $tabledrag_options[] = [
       'action' => 'depth',
       'relationship' => 'group',
       'group' => 'bricks-depth',
-    );
+    ];
     // Fake option to enable indentation:
-    $tabledrag_options[] = array(
+    $tabledrag_options[] = [
       'action' => 'match',
       'relationship' => 'parent',
       'group' => $order_class,
-    );
+    ];
 
-    $variables['table']['#attached']['drupalSettings']['bricks']['nesting'] = _bricks_get_nesting_data($element['#entity_type']);
+    if (isset($element['#entity_type'])) {
+        $variables['table']['#attached']['drupalSettings']['bricks']['nesting'] = _bricks_get_nesting_data($element['#entity_type']);
+    }
     $variables['table']['#attached']['library'][] = 'bricks/tabledrag.bricks';
   }
 }
@@ -233,35 +280,57 @@ function _bricks_preprocess_tabledrag_form(&$variables, $element_key, $widget, $
 /**
  * Helper function for widget's formElement().
  */
-function _bricks_form_element_alter(&$element, $item, $entity_type) {
-  $element['depth'] = array(
-    '#type' => 'hidden', // @TODO: Other types break the correct indentations.
+function _bricks_form_element_alter(&$element, $item, $entity) {
+  $element['depth'] = [
+  // @TODO: Other types break the correct indentations.
+    '#type' => 'hidden',
     '#default_value' => !empty($item->depth) ? $item->depth : 0,
     '#weight' => 10,
-    '#attributes' => array(
-      'class' => array('bricks-depth'),
-    ),
-  );
-  $element['options'] = array(
+    '#attributes' => [
+      'class' => ['bricks-depth'],
+    ],
+  ];
+  $element['options'] = [
     '#type' => 'container',
     '#weight' => 100,
-    '#attributes' => array(
-      'class' => array('container-inline'),
-    ),
-  );
-  $element['options']['view_mode'] = array(
-    '#type' => 'select',
-    '#options' => \Drupal::service('entity_display.repository')->getViewModeOptions($entity_type),
-    '#default_value' => !empty($item->options['view_mode']) ? $item->options['view_mode'] : NULL,
-  );
-  $element['options']['css_class'] = array(
+    '#attributes' => [
+      'class' => ['container-inline'],
+    ],
+  ];
+  if ($entity) {
+    if ($entity->bundle() == 'layout' && \Drupal::service('module_handler')->moduleExists('layout_discovery')) {
+      $element['options']['layout'] = [
+        '#type' => 'select',
+        '#options' => \Drupal::service('plugin.manager.core.layout')->getLayoutOptions(),
+        '#default_value' => !empty($item->options['layout']) ? $item->options['layout'] : NULL,
+      ];
+    }
+    if ($entity->bundle() != 'layout') {
+      $element['options']['view_mode'] = [
+        '#type' => 'select',
+        '#options' => \Drupal::service('entity_display.repository')->getViewModeOptions($entity->getEntityTypeId()),
+        '#default_value' => !empty($item->options['view_mode']) ? $item->options['view_mode'] : NULL,
+      ];
+    }
+  }
+  $element['options']['css_class'] = [
     '#type' => 'textfield',
     '#default_value' => !empty($item->options['css_class']) ? $item->options['css_class'] : '',
     '#size' => 10,
-    '#attributes' => array(
+    '#attributes' => [
       'placeholder' => t('CSS class(-es)'),
-    ),
-  );
+    ],
+  ];
+}
+
+/* MISC */
+
+/**
+ * Prepares variables for `block.html.twig` for `system_powered_by_block`.
+ */
+function bricks_preprocess_block__system_powered_by_block(&$variables) {
+  $bricks_link = '<a href="https://uibricks.com">Bricks</a>';
+  $variables['content']['#markup'] = str_replace('>Drupal</a>', '>Drupal</a> & ' . $bricks_link, $variables['content']['#markup']);
 }
 
 /**
@@ -273,14 +342,16 @@ function _bricks_get_nesting_data($return_entity_type = NULL) {
 
   $formatted_nesting_data = [];
 
-  foreach ($nesting_data as $entity_type => $bundles) {
-    foreach ($bundles as $bundle => $bundles_that_may_be_parent) {
-      foreach ($bundles_that_may_be_parent as $bundle_that_may_be_parent) {
-        if ($bundle_that_may_be_parent) {
-          $formatted_nesting_data[$entity_type][$bundle][] = $bundle_that_may_be_parent;
-        }
+  if (isset($nesting_data)) {
+      foreach ($nesting_data as $entity_type => $bundles) {
+          foreach ($bundles as $bundle => $bundles_that_may_be_parent) {
+              foreach ($bundles_that_may_be_parent as $bundle_that_may_be_parent) {
+                  if ($bundle_that_may_be_parent) {
+                      $formatted_nesting_data[$entity_type][$bundle][] = $bundle_that_may_be_parent;
+                  }
+              }
+          }
       }
-    }
   }
 
   if ($return_entity_type) {
